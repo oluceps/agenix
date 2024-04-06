@@ -14,6 +14,10 @@ with lib; let
 
   users = config.users.users;
 
+  sysusersEnabled = options.systemd ? sysusers;
+
+  a = trace sysusersEnabled;
+
   mountCommand =
     if isDarwin
     then ''
@@ -262,7 +266,36 @@ in {
       ];
     }
 
-    (optionalAttrs (!isDarwin) {
+    (optionalAttrs sysusersEnabled {
+      # When using sysusers we no longer be started as an activation script because those
+      # are started in initrd while sysusers is started later.
+      systemd.services.agenix-install-secrets = {
+        wantedBy = ["sysinit.target"];
+        after = ["systemd-sysusers.service"];
+        unitConfig.DefaultDependencies = "no";
+
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = [
+            (pkgs.writeShellApplication {
+              name = "newGeneration";
+              text = newGeneration;
+            })
+            (pkgs.writeShellApplication {
+              name = "agenixInstall";
+              text = installSecrets;
+            })
+            (pkgs.writeShellApplication {
+              name = "agenixChown";
+              text = chownSecrets;
+            })
+          ];
+          RemainAfterExit = true;
+        };
+      };
+    })
+
+    (optionalAttrs (!isDarwin && !sysusersEnabled) {
       # Create a new directory full of secrets for symlinking (this helps
       # ensure removed secrets are actually removed, or at least become
       # invalid symlinks).
